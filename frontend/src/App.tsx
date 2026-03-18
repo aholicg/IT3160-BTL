@@ -67,6 +67,7 @@ function App() {
   const [endStation, setEndStation] = useState<any>(null);
   const [metric, setMetric] = useState<string>('duration');
   const [excludedLines, setExcludedLines] = useState<any[]>([]);
+  const [excludedEdges, setExcludedEdges] = useState<any[]>([]);
 
   const [routePath, setRoutePath] = useState<any[]>([]);
   const [error, setError] = useState<string>('');
@@ -93,6 +94,28 @@ function App() {
   const stationOptions = stations.map(s => ({ value: s.stationname, label: s.stationname }));
   const lineOptions = lines.map(l => ({ value: l.lineid, label: l.linename }));
 
+  // Generate edge options
+  const edgeOptionsMap = new Map<string, any>();
+  graphEdges.forEach(edge => {
+    if (edge.nid === 0) return; // Don't allow excluding transfers here
+    const sNode = graphNodes.find(n => n.id === edge.source);
+    const tNode = graphNodes.find(n => n.id === edge.target);
+    if (!sNode || !tNode) return;
+
+    // Create a unique key for the undirected edge to avoid duplicates (A->B and B->A)
+    const sortedIds = [edge.source, edge.target].sort();
+    const key = sortedIds.join('|');
+
+    if (!edgeOptionsMap.has(key)) {
+      const lineName = lines.find(l => l.lineid === edge.nid)?.linename || `Line ${edge.nid}`;
+      edgeOptionsMap.set(key, {
+        value: { source: edge.source, target: edge.target },
+        label: `${lineName}: ${sNode.name} ↔ ${tNode.name}`
+      });
+    }
+  });
+  const edgeOptions = Array.from(edgeOptionsMap.values()).sort((a, b) => a.label.localeCompare(b.label));
+
   const calculateRoute = async () => {
     if (!startStation || !endStation) {
       setError("Please select both start and end stations.");
@@ -106,7 +129,8 @@ function App() {
         start_station: startStation.value,
         end_station: endStation.value,
         metric: metric,
-        excluded_lines: excludedLines.map(l => l.value)
+        excluded_lines: excludedLines.map(l => l.value),
+        excluded_edges: excludedEdges.map(e => e.value)
       });
       setRoutePath(response.data.path);
     } catch (err: any) {
@@ -135,10 +159,17 @@ function App() {
   // Pre-calculate polyline segments for the background map
   const backgroundPolylines = [];
   const excludedSet = new Set(excludedLines.map(l => l.value));
+  const excludedEdgeSet = new Set(excludedEdges.map(e => {
+    const sorted = [e.value.source, e.value.target].sort();
+    return sorted.join('|');
+  }));
 
   for (const edge of graphEdges) {
     if (edge.nid === 0) continue; // Skip transfers in background draw
     if (excludedSet.has(edge.nid)) continue; // Don't draw excluded lines
+
+    const edgeKey = [edge.source, edge.target].sort().join('|');
+    if (excludedEdgeSet.has(edgeKey)) continue; // Don't draw excluded individual edges
 
     const sourceNode = graphNodes.find(n => n.id === edge.source);
     const targetNode = graphNodes.find(n => n.id === edge.target);
@@ -237,6 +268,17 @@ function App() {
             value={excludedLines}
             onChange={(val) => setExcludedLines(val as any)}
             placeholder="Select lines to exclude..."
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Exclude Specific Connections</label>
+          <Select
+            isMulti
+            options={edgeOptions}
+            value={excludedEdges}
+            onChange={(val) => setExcludedEdges(val as any)}
+            placeholder="Select connections to avoid..."
           />
         </div>
 
