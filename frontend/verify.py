@@ -6,22 +6,17 @@ def verify_feature(page: Page):
     page.goto("http://localhost:4173")
     page.wait_for_timeout(1000)
 
-    # Fill start station
-    page.locator('.form-group').nth(0).locator('input').fill("PEOPLE'S SQUARE")
+    # Change to "Use Coordinate" mode
+    page.get_by_text("Use Coordinate (Click map)").click()
     page.wait_for_timeout(500)
-    page.keyboard.press("Enter")
+
+    # Click somewhere on the map (roughly the center)
+    page.mouse.click(800, 400)
     page.wait_for_timeout(500)
 
     # Fill end station
-    page.locator('.form-group').nth(1).locator('input').fill("CENTURY AVENUE")
+    page.locator('.form-group').nth(2).locator('input').fill("CENTURY AVENUE")
     page.wait_for_timeout(500)
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(500)
-
-    # Exclude an edge (e.g. PEOPLE'S SQUARE to EAST NANJING ROAD)
-    page.locator('.form-group').nth(4).locator('input').fill("PEOPLE'S SQUARE")
-    page.wait_for_timeout(500)
-    page.keyboard.press("ArrowDown")
     page.keyboard.press("Enter")
     page.wait_for_timeout(500)
 
@@ -40,7 +35,7 @@ if __name__ == "__main__":
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(record_video_dir="/home/jules/verification/video")
+        context = browser.new_context(record_video_dir="/home/jules/verification/video", viewport={"width": 1280, "height": 800})
         page = context.new_page()
         try:
             verify_feature(page)

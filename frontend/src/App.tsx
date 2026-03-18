@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import Select from 'react-select';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
 
-// Fix leaflet icon issue in react
 import L from 'leaflet';
 
 interface Station {
@@ -57,19 +56,31 @@ function MapUpdater({ path }: { path: any[] }) {
   return null;
 }
 
+function ClickHandler({ onMapClick }: { onMapClick: (latlng: L.LatLng) => void }) {
+  useMapEvents({
+    click(e) {
+      onMapClick(e.latlng);
+    }
+  });
+  return null;
+}
+
 function App() {
   const [stations, setStations] = useState<Station[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
   const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
   const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
 
+  const [useCoordinate, setUseCoordinate] = useState<boolean>(false);
   const [startStation, setStartStation] = useState<any>(null);
+  const [startCoord, setStartCoord] = useState<{lat: number, lng: number} | null>(null);
   const [endStation, setEndStation] = useState<any>(null);
   const [metric, setMetric] = useState<string>('duration');
   const [excludedLines, setExcludedLines] = useState<any[]>([]);
   const [excludedEdges, setExcludedEdges] = useState<any[]>([]);
 
   const [routePath, setRoutePath] = useState<any[]>([]);
+  const [actualStartStation, setActualStartStation] = useState<string>('');
   const [error, setError] = useState<string>('');
 
   useEffect(() => {
@@ -117,22 +128,40 @@ function App() {
   const edgeOptions = Array.from(edgeOptionsMap.values()).sort((a, b) => a.label.localeCompare(b.label));
 
   const calculateRoute = async () => {
-    if (!startStation || !endStation) {
-      setError("Please select both start and end stations.");
+    if (!useCoordinate && !startStation) {
+      setError("Please select a start station.");
       return;
     }
+    if (useCoordinate && !startCoord) {
+      setError("Please select a start coordinate on the map.");
+      return;
+    }
+    if (!endStation) {
+      setError("Please select an end station.");
+      return;
+    }
+
     setError('');
     setRoutePath([]);
+    setActualStartStation('');
+
+    const payload: any = {
+      end_station: endStation.value,
+      metric: metric,
+      excluded_lines: excludedLines.map(l => l.value),
+      excluded_edges: excludedEdges.map(e => e.value)
+    };
+
+    if (useCoordinate) {
+      payload.start_coord = startCoord;
+    } else {
+      payload.start_station = startStation.value;
+    }
 
     try {
-      const response = await axios.post('http://localhost:8000/route', {
-        start_station: startStation.value,
-        end_station: endStation.value,
-        metric: metric,
-        excluded_lines: excludedLines.map(l => l.value),
-        excluded_edges: excludedEdges.map(e => e.value)
-      });
+      const response = await axios.post('http://localhost:8000/route', payload);
       setRoutePath(response.data.path);
+      setActualStartStation(response.data.start_station_used);
     } catch (err: any) {
       setError(err.response?.data?.detail || "An error occurred calculating the route.");
     }
@@ -141,6 +170,10 @@ function App() {
   const getRouteSteps = () => {
     if (routePath.length === 0) return [];
     const steps = [];
+    if (useCoordinate) {
+      steps.push(`Walk to nearest station: ${actualStartStation}`);
+    }
+
     let currentLine = routePath[0].line_id;
     let currentStart = routePath[0].name;
 
@@ -217,20 +250,49 @@ function App() {
     }
   }
 
+  const handleMapClick = (latlng: L.LatLng) => {
+    if (useCoordinate) {
+      setStartCoord({ lat: latlng.lat, lng: latlng.lng });
+    }
+  };
+
   return (
     <div className="app-container">
       <div className="sidebar">
         <h2>Shanghai Subway Router</h2>
 
         <div className="form-group">
-          <label>Start Station</label>
-          <Select
-            options={stationOptions}
-            value={startStation}
-            onChange={setStartStation}
-            isClearable
-          />
+          <label>Start Location Mode</label>
+          <div className="radio-group">
+            <label>
+              <input type="radio" checked={!useCoordinate} onChange={() => setUseCoordinate(false)} />
+              Select Station
+            </label>
+            <label>
+              <input type="radio" checked={useCoordinate} onChange={() => setUseCoordinate(true)} />
+              Use Coordinate (Click map)
+            </label>
+          </div>
         </div>
+
+        {!useCoordinate ? (
+          <div className="form-group">
+            <label>Start Station</label>
+            <Select
+              options={stationOptions}
+              value={startStation}
+              onChange={setStartStation}
+              isClearable
+            />
+          </div>
+        ) : (
+          <div className="form-group">
+            <label>Selected Coordinate</label>
+            <div>
+              {startCoord ? `Lat: ${startCoord.lat.toFixed(4)}, Lng: ${startCoord.lng.toFixed(4)}` : "Click on the map to set start location"}
+            </div>
+          </div>
+        )}
 
         <div className="form-group">
           <label>End Station</label>
@@ -247,11 +309,11 @@ function App() {
           <div className="radio-group">
             <label>
               <input type="radio" value="duration" checked={metric === 'duration'} onChange={(e) => setMetric(e.target.value)} />
-              Fastest (Duration)
+              Fastest
             </label>
             <label>
               <input type="radio" value="distance" checked={metric === 'distance'} onChange={(e) => setMetric(e.target.value)} />
-              Shortest (Distance)
+              Shortest
             </label>
             <label>
               <input type="radio" value="transfers" checked={metric === 'transfers'} onChange={(e) => setMetric(e.target.value)} />
@@ -267,7 +329,7 @@ function App() {
             options={lineOptions}
             value={excludedLines}
             onChange={(val) => setExcludedLines(val as any)}
-            placeholder="Select lines to exclude..."
+            placeholder="Select lines..."
           />
         </div>
 
@@ -278,7 +340,7 @@ function App() {
             options={edgeOptions}
             value={excludedEdges}
             onChange={(val) => setExcludedEdges(val as any)}
-            placeholder="Select connections to avoid..."
+            placeholder="Select connections..."
           />
         </div>
 
@@ -305,6 +367,8 @@ function App() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
+          <ClickHandler onMapClick={handleMapClick} />
+
           {backgroundPolylines}
           {routePolylines}
 
@@ -321,6 +385,28 @@ function App() {
               <Popup>{s.stationname}</Popup>
             </CircleMarker>
           ))}
+
+          {/* Draw Start Coordinate Marker */}
+          {useCoordinate && startCoord && (
+             <CircleMarker
+              center={[startCoord.lat, startCoord.lng]}
+              radius={8}
+              color="#000"
+              fillColor="#007bff"
+              fillOpacity={1}
+            >
+              <Popup>Selected Start Location</Popup>
+            </CircleMarker>
+          )}
+
+          {useCoordinate && startCoord && routePath.length > 0 && (
+            <Polyline
+              positions={[[startCoord.lat, startCoord.lng], [routePath[0].lat, routePath[0].lng]]}
+              color="#007bff"
+              dashArray="5, 10"
+              weight={3}
+            />
+          )}
 
           <MapUpdater path={routePath} />
         </MapContainer>

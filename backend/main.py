@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import networkx as nx
 import pandas as pd
 from typing import List, Optional
+import math
 
 app = FastAPI()
 
@@ -14,6 +15,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Radius of earth in km
+    dLat = math.radians(lat2 - lat1)
+    dLon = math.radians(lon2 - lon1)
+    a = (math.sin(dLat / 2) * math.sin(dLat / 2) +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+         math.sin(dLon / 2) * math.sin(dLon / 2))
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
 # Load data
 stations_df = pd.read_csv('../stations_sh.csv')
@@ -62,8 +73,13 @@ class Edge(BaseModel):
     source: str
     target: str
 
+class Coordinate(BaseModel):
+    lat: float
+    lng: float
+
 class RouteRequest(BaseModel):
-    start_station: str
+    start_station: Optional[str] = None
+    start_coord: Optional[Coordinate] = None
     end_station: str
     metric: str # 'distance', 'duration', 'transfers'
     excluded_lines: List[int] = []
@@ -103,12 +119,36 @@ def get_graph():
 
 @app.post("/route")
 def calculate_route(req: RouteRequest):
-    if req.start_station not in station_name_to_id:
-        raise HTTPException(status_code=400, detail="Invalid start station")
+    if not req.start_station and not req.start_coord:
+        raise HTTPException(status_code=400, detail="Must provide start_station or start_coord")
+
+    start_id = None
+    actual_start_station = req.start_station
+
+    if req.start_coord:
+        # Find nearest station
+        min_dist = float('inf')
+        nearest_station_id = None
+        nearest_station_name = None
+        for idx, row in stations_df.iterrows():
+            dist = haversine(req.start_coord.lat, req.start_coord.lng, row['lat'], row['lng'])
+            if dist < min_dist:
+                min_dist = dist
+                nearest_station_id = int(row['stationid'])
+                nearest_station_name = row['stationname']
+
+        if nearest_station_id is None:
+            raise HTTPException(status_code=400, detail="No stations found")
+        start_id = nearest_station_id
+        actual_start_station = nearest_station_name
+    else:
+        if req.start_station not in station_name_to_id:
+            raise HTTPException(status_code=400, detail="Invalid start station")
+        start_id = station_name_to_id[req.start_station]
+
     if req.end_station not in station_name_to_id:
         raise HTTPException(status_code=400, detail="Invalid end station")
 
-    start_id = station_name_to_id[req.start_station]
     end_id = station_name_to_id[req.end_station]
 
     # Create a subgraph filtering out excluded lines and edges
@@ -172,7 +212,7 @@ def calculate_route(req: RouteRequest):
 
     # Add virtual start node
     H.add_node('START')
-    start_platforms = [n for n in H.nodes() if n != 'START' and n != 'END' and int(n.split('-')[1]) == start_id]
+    start_platforms = [n for n in H.nodes() if n != 'START' and n != 'END' and int(str(n).split('-')[1]) == start_id]
     if not start_platforms:
         raise HTTPException(status_code=400, detail="Start station is disconnected or excluded")
     for sp in start_platforms:
@@ -180,7 +220,7 @@ def calculate_route(req: RouteRequest):
 
     # Add virtual end node
     H.add_node('END')
-    end_platforms = [n for n in H.nodes() if n != 'START' and n != 'END' and int(n.split('-')[1]) == end_id]
+    end_platforms = [n for n in H.nodes() if n != 'START' and n != 'END' and int(str(n).split('-')[1]) == end_id]
     if not end_platforms:
         raise HTTPException(status_code=400, detail="End station is disconnected or excluded")
     for ep in end_platforms:
@@ -205,6 +245,7 @@ def calculate_route(req: RouteRequest):
             })
 
         return {
+            "start_station_used": actual_start_station,
             "path": route_nodes,
         }
     except nx.NetworkXNoPath:
