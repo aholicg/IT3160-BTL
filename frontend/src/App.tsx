@@ -89,6 +89,7 @@ function App() {
   const [endCoord, setEndCoord] = useState<{lat: number, lng: number} | null>(null); // from map click
 
   const [metric, setMetric] = useState<string>('duration');
+  const [algorithm, setAlgorithm] = useState<string>('dijkstra');
   const [excludedLines, setExcludedLines] = useState<any[]>([]);
   const [excludedEdges, setExcludedEdges] = useState<any[]>([]);
 
@@ -214,6 +215,7 @@ function App() {
 
     const payload: any = {
       metric: metric,
+      algorithm: algorithm,
       excluded_lines: excludedLines.map(l => l.value),
       excluded_edges: excludedEdges.map(e => e.value)
     };
@@ -392,6 +394,18 @@ function App() {
             <label><input type="radio" value="duration" checked={metric === 'duration'} onChange={(e) => setMetric(e.target.value)} /> Fastest</label>
             <label><input type="radio" value="distance" checked={metric === 'distance'} onChange={(e) => setMetric(e.target.value)} /> Shortest</label>
             <label><input type="radio" value="transfers" checked={metric === 'transfers'} onChange={(e) => setMetric(e.target.value)} /> Min Transfers</label>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label>Algorithm</label>
+          <div className="radio-group" style={{flexWrap: 'wrap'}}>
+            <label><input type="radio" value="dijkstra" checked={algorithm === 'dijkstra'} onChange={(e) => setAlgorithm(e.target.value)} /> Dijkstra</label>
+            <label><input type="radio" value="astar" checked={algorithm === 'astar'} onChange={(e) => setAlgorithm(e.target.value)} /> A* Search</label>
+            <label><input type="radio" value="ucs" checked={algorithm === 'ucs'} onChange={(e) => setAlgorithm(e.target.value)} /> UCS</label>
+            <label><input type="radio" value="bidirectional" checked={algorithm === 'bidirectional'} onChange={(e) => setAlgorithm(e.target.value)} /> Bidirectional Dijkstra</label>
+            <label><input type="radio" value="dls" checked={algorithm === 'dls'} onChange={(e) => setAlgorithm(e.target.value)} /> DLS</label>
+            <label><input type="radio" value="ids" checked={algorithm === 'ids'} onChange={(e) => setAlgorithm(e.target.value)} /> IDS</label>
           </div>
         </div>
 
