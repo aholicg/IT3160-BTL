@@ -1,0 +1,90 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T5]{fontenc}
+\usepackage[vietnamese]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\begin{document}
+
+\section{Phân tích chi tiết các module}
+
+Dự án Shanghai Subway Router được thiết kế theo mô hình Client-Server (Frontend - Backend) nhằm mục đích phân tách rõ ràng giữa giao diện người dùng và logic xử lý dữ liệu lõi. Dưới đây là phân tích chi tiết về kiến trúc, chức năng và công nghệ sử dụng trong từng module của hệ thống.
+
+\subsection{Module Backend (Máy chủ xử lý)}
+
+Module Backend đóng vai trò như một bộ não của ứng dụng, chịu trách nhiệm lưu trữ, tiền xử lý dữ liệu và cung cấp các thuật toán tìm kiếm đường đi ngắn nhất hoặc tối ưu nhất. Module này được phát triển bằng ngôn ngữ \textbf{Python} kết hợp với framework \textbf{FastAPI} để cung cấp các API RESTful hiệu năng cao.
+
+\subsubsection{Cấu trúc và Khởi tạo dữ liệu}
+\begin{itemize}
+    \item \textbf{Khởi tạo và Tải dữ liệu:} Hệ thống sử dụng thư viện \texttt{pandas} để đọc dữ liệu các trạm và các tuyến từ file \texttt{stations\_sh.csv} và \texttt{lines\_sh.csv}.
+    \item \textbf{Cấu trúc Đồ thị (Graph):} Thư viện \texttt{NetworkX} được sử dụng để đọc đồ thị mạng lưới tàu điện ngầm Thượng Hải từ file \texttt{PrimalGraph\_sh\_2020.gml}. Mỗi trạm (station) là một tập hợp các nút (node - platform) tương ứng với các tuyến khác nhau đi qua trạm đó. Các cạnh (edge) biểu diễn đường đi giữa các trạm trên cùng một tuyến hoặc lối chuyển tuyến (transfer) trong cùng một trạm.
+\end{itemize}
+
+\subsubsection{Các API RESTful chính}
+Hệ thống cung cấp các điểm cuối (endpoints) giao tiếp thông qua giao thức HTTP:
+\begin{itemize}
+    \item \texttt{GET /stations}: Lấy danh sách toàn bộ các trạm tàu điện ngầm, bao gồm \texttt{stationid}, \texttt{stationname}, cùng với tọa độ địa lý (\texttt{lat}, \texttt{lng}).
+    \item \texttt{GET /lines}: Trả về thông tin của các tuyến tàu điện ngầm (ví dụ: Line 1, Line 2,...).
+    \item \texttt{GET /graph}: Cung cấp toàn bộ cấu trúc đồ thị (danh sách nodes và edges) để Frontend có thể vẽ lên bản đồ.
+    \item \texttt{POST /route}: Endpoint quan trọng nhất, tiếp nhận yêu cầu tìm đường. Nhận vào điểm xuất phát và điểm đích (có thể là tên trạm hoặc tọa độ địa lý trực tiếp), tiêu chí tối ưu hóa (thời gian, khoảng cách, số lần chuyển tuyến), thuật toán mong muốn và danh sách các tuyến/cạnh bị loại trừ.
+\end{itemize}
+
+\subsubsection{Logic Xử lý Yêu cầu Tìm đường (Routing Logic)}
+\begin{itemize}
+    \item \textbf{Xử lý Tọa độ không gian:} Khi người dùng chọn điểm xuất phát/đích bằng cách click trên bản đồ (truyền vào tọa độ), Backend sử dụng công thức \textbf{Haversine} để tính khoảng cách đường chim bay nhằm tìm ra trạm tàu điện ngầm gần nhất.
+    \item \textbf{Lọc Đồ thị (Graph Filtering):} Dựa vào tham số \texttt{excluded\_lines} và \texttt{excluded\_edges}, hệ thống sẽ tạo một đồ thị con (subgraph) bằng cách bỏ qua các cạnh tương ứng, cho phép mô phỏng tình huống một tuyến hoặc một đoạn đường đang bị bảo trì.
+    \item \textbf{Xử lý Trọng số (Weight Assignment):} Backend linh hoạt thay đổi trọng số (weight) của các cạnh dựa trên tiêu chí người dùng:
+    \begin{itemize}
+        \item \texttt{distance}: Sử dụng trực tiếp thuộc tính khoảng cách.
+        \item \texttt{duration}: Tối ưu hóa thời gian, phạt nặng thời gian chuyển tuyến (nid = 0) với mức phạt tối thiểu (thường là 3 phút) để phản ánh thực tế đi bộ.
+        \item \texttt{transfers}: Phạt cực nặng (trọng số lớn, ví dụ: 1000) đối với các cạnh chuyển tuyến nội bộ trạm, ép thuật toán tìm đường đi ít phải đổi tuyến nhất có thể.
+    \end{itemize}
+    \item \textbf{Nút ảo (Virtual Nodes):} Để giải quyết vấn đề một trạm có nhiều platform (nhiều node trong đồ thị), hệ thống thêm hai nút ảo \texttt{START} và \texttt{END}, sau đó kết nối các nút ảo này đến tất cả các platform của trạm xuất phát và trạm đích với trọng số 0. Điều này giúp thuật toán chỉ cần tìm đường đi từ \texttt{START} đến \texttt{END}.
+\end{itemize}
+
+\subsubsection{Module Thuật toán Tìm kiếm (Algorithms)}
+Dự án cài đặt nhiều thuật toán tìm kiếm đường đi khác nhau (được module hóa trong thư mục \texttt{algorithms/}) để có thể so sánh và phục vụ tùy chọn của người dùng:
+\begin{itemize}
+    \item \textbf{Dijkstra:} Thuật toán cơ bản, tìm đường đi ngắn nhất trên đồ thị có trọng số không âm. Được sử dụng bởi hàm \texttt{nx.dijkstra\_path}.
+    \item \textbf{A* (A-Star):} Kết hợp thuật toán Dijkstra với hàm heuristic (ước lượng). Ở dự án này, khoảng cách Haversine giữa các tọa độ trạm được sử dụng làm heuristic, giúp tăng tốc quá trình tìm kiếm không gian trạng thái.
+    \item \textbf{Uniform Cost Search (UCS):} Tìm kiếm với chi phí đồng nhất, tương tự Dijkstra nhưng duyệt theo chi phí lũy kế tối ưu ở từng thời điểm.
+    \item \textbf{Bidirectional Dijkstra:} Phiên bản tối ưu của Dijkstra, tiến hành tìm kiếm đồng thời từ hai phía (trạm bắt đầu và trạm đích) cho đến khi chúng gặp nhau ở giữa, giúp giảm đáng kể thời gian chạy trong đồ thị mạng lưới khổng lồ.
+    \item \textbf{Depth-Limited Search (DLS) \& Iterative Deepening Search (IDS):} Thuật toán tìm kiếm theo chiều sâu với giới hạn độ sâu nhằm duyệt các khả năng với không gian bộ nhớ thấp, mặc dù không đảm bảo tối ưu về trọng số khi các cạnh có trọng số khác biệt, nhưng hữu ích để so sánh hiệu năng và số trạng thái mở rộng.
+\end{itemize}
+
+\subsection{Module Frontend (Giao diện Người dùng)}
+
+Module Frontend được xây dựng nhằm cung cấp một giao diện Bản đồ thông minh (tương tự Google Maps) với tính tương tác cao. Hệ thống sử dụng \textbf{React (TypeScript)} kết hợp với công cụ build \textbf{Vite} mang lại trải nghiệm mượt mà, phản hồi nhanh chóng.
+
+\subsubsection{Tích hợp Bản đồ số (Map Integration)}
+\begin{itemize}
+    \item \textbf{Thư viện \texttt{react-leaflet} \& \texttt{Leaflet}:} Ứng dụng sử dụng OpenStreetMap làm lớp bản đồ nền (TileLayer). Các trạm tàu điện ngầm được vẽ lên bản đồ sử dụng \texttt{CircleMarker}.
+    \item \textbf{Hiển thị Mạng lưới Tàu điện:} Dựa trên cấu trúc đồ thị lấy từ API \texttt{/graph}, Frontend tiến hành vẽ các đoạn thẳng ( \texttt{Polyline} ) kết nối các trạm. Các tuyến bị người dùng loại trừ (\texttt{excludedLines}, \texttt{excludedEdges}) sẽ bị ẩn khỏi bản đồ, giúp người dùng trực quan thấy được cấu trúc mạng lưới đang khả dụng.
+    \item \textbf{Hiển thị Đường đi (Route Polylines):} Sau khi gọi API \texttt{/route} thành công, đường đi kết quả sẽ được highlight (nhấn mạnh) bằng các nét vẽ đậm, có màu sắc tương ứng với màu đặc trưng của từng tuyến tàu (Line ID). Đường nét đứt (dashed line) được vẽ để nối từ vị trí click chuột (tọa độ tùy ý) đến trạm tàu gần nhất để mô phỏng khoảng cách đi bộ.
+\end{itemize}
+
+\subsubsection{Các Component Tương tác Người dùng}
+\begin{itemize}
+    \item \textbf{Lựa chọn Điểm đi \& Điểm đến (Location Selectors):}
+    \begin{itemize}
+        \item Người dùng có hai chế độ: \textit{Nhập tên trạm/địa danh} hoặc \textit{Click trực tiếp lên bản đồ}.
+        \item Để nhập tên địa danh, ứng dụng sử dụng \texttt{react-select-async-paginate} và gọi API \texttt{Nominatim} của OpenStreetMap để tìm kiếm các địa điểm lân cận khu vực Thượng Hải (POI - Point of Interest) tự động hoàn thành (autocomplete), hoặc lọc trực tiếp từ danh sách các trạm tàu điện (Local Subway Stations).
+    \end{itemize}
+    \item \textbf{Bảng điều khiển Tìm kiếm (Control Panel):} Bao gồm các lựa chọn tối ưu hóa (\textit{Fastest, Shortest, Min Transfers}), lựa chọn Thuật toán (\textit{Dijkstra, A*, UCS,...}), và các Select box hỗ trợ chọn nhiều tuyến (Multi-select) để loại trừ tuyến/chặng bảo trì.
+\end{itemize}
+
+\subsubsection{Giao tiếp API (API Communication)}
+\begin{itemize}
+    \item Thư viện \texttt{axios} được sử dụng để thực hiện các lời gọi HTTP request tới Backend.
+    \item Khi tải trang, Frontend sử dụng hook \texttt{useEffect} và \texttt{Promise.all} để kéo đồng thời dữ liệu từ \texttt{/stations}, \texttt{/lines}, và \texttt{/graph} giúp tối ưu hóa thời gian tải ban đầu.
+    \item Khi nhấn "Find Route", một JSON payload chứa các tham số được gửi đi dưới dạng \texttt{POST}. Kết quả trả về (danh sách các nút trong đường đi cùng với thông tin tên trạm thực tế) được Frontend phân tích và sinh ra các \textit{Hướng dẫn di chuyển chi tiết} (Route Steps) (ví dụ: "Bắt tuyến Line 1 từ X đến Y", "Chuyển tuyến tại Y sang Line 2", "Đi bộ đến trạm...").
+\end{itemize}
+
+\subsection{Tổng kết}
+Kiến trúc của dự án áp dụng tốt các nguyên lý phân tách trách nhiệm. Backend tập trung vào thuật toán đồ thị với thư viện toán học chuyên dụng (NetworkX, Pandas) mang lại độ ổn định và chính xác. Frontend cung cấp một hệ thống công cụ đồ họa trực quan (Leaflet) và tương tác thời gian thực thông qua hệ thống State Management của React. Việc bổ sung thuật toán đa dạng và API bản đồ ngoại vi (Nominatim) làm cho ứng dụng mang tính thực tiễn cao và toàn diện.
+
+\end{document}
